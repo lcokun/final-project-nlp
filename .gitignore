@@ -1,0 +1,22 @@
+# data
+data/*.csv
+data/*.zip
+
+# model artifacts
+*.pt
+*.bin
+*.safetensors
+
+# environments
+.venv/
+__pycache__/
+*.pyc
+
+# sensitive
+.env
+
+# uv
+.python-version
+
+# jupyter
+.ipynb_checkpoints/

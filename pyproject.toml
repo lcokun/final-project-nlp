@@ -1,0 +1,39 @@
+[project]
+name = "final-project-nlp"
+version = "0.1.0"
+description = "Toxic comment detector: binary text classification with classical ML and DistilBERT, XAI word highlights, Streamlit app. SAIA 2163 final project."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # deep learning
+    "torch>=2.2.0",
+    "transformers>=4.40.0",
+    "datasets>=2.19.0",
+    "accelerate>=0.29.0",
+    "evaluate>=0.4.1",
+    "huggingface-hub>=0.22.2",
+    # classical ml
+    "scikit-learn>=1.4.2",
+    "joblib>=1.4.0",
+    # xai
+    "lime>=0.2.0.1",
+    "shap>=0.45.0",
+    # nlp preprocessing
+    "nltk>=3.8.1",
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.2.1",
+    # data
+    "numpy>=1.26.4",
+    "pandas>=2.2.2",
+    # visualisation
+    "matplotlib>=3.8.4",
+    "seaborn>=0.13.2",
+    "plotly>=5.21.0",
+    "wordcloud>=1.9.3",
+    # app
+    "streamlit>=1.33.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
