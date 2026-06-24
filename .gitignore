@@ -20,3 +20,4 @@ __pycache__/
 
 # jupyter
 .ipynb_checkpoints/
+!data/balanced_corpus.csv
