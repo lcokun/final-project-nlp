@@ -14,10 +14,14 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from lime.lime_text import LimeTextExplainer
 
+from src.preprocess import detect_language, preprocess
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 BASE       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(BASE, "models")
-HF_REPO    = "lcokun/toxic-comment-distilbert"
+HF_REPO           = "lcokun/toxic-comment-distilbert"
+HF_REPO_BILINGUAL = "lcokun/toxic-comment-xlm-roberta-bilingual"
+LOCAL_BILINGUAL   = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "xlm_roberta_bilingual")
 MAX_LEN    = 128
 
 CLASSICAL_MODELS = {
@@ -35,25 +39,51 @@ CLASSICAL_MODELS = {
     },
 }
 
+BILINGUAL_MODELS = {
+    "Logistic Regression (TF-IDF)": {
+        "model": "logistic_regression_tfidf_bilingual.joblib",
+        "vec":   "vectorizer_tfidf_bilingual.joblib",
+    },
+    "Logistic Regression (BoW)": {
+        "model": "logistic_regression_bow_bilingual.joblib",
+        "vec":   "vectorizer_bow_bilingual.joblib",
+    },
+    "SVM (TF-IDF)": {
+        "model": "svm_tfidf_bilingual.joblib",
+        "vec":   "vectorizer_tfidf_bilingual.joblib",
+    },
+    "Naive Bayes (TF-IDF)": {
+        "model": "naive_bayes_tfidf_bilingual.joblib",
+        "vec":   "vectorizer_tfidf_bilingual.joblib",
+    },
+    "Naive Bayes (BoW)": {
+        "model": "naive_bayes_bow_bilingual.joblib",
+        "vec":   "vectorizer_bow_bilingual.joblib",
+    },
+    "SVM (BoW)": {
+        "model": "svm_bow_bilingual.joblib",
+        "vec":   "vectorizer_bow_bilingual.joblib",
+    },
+}
+
 # ── Model loading ──────────────────────────────────────────────────────────────
 _cache = {}
 
 def load_models():
-    """
-    Loads all classical models + DistilBERT into memory.
-    Call once at app startup. Returns the cache dict.
-    """
     global _cache
     if _cache:
         return _cache
 
-    # classical models
     for name, paths in CLASSICAL_MODELS.items():
         model = joblib.load(os.path.join(MODELS_DIR, paths["model"]))
         vec   = joblib.load(os.path.join(MODELS_DIR, paths["vec"]))
-        _cache[name] = {"model": model, "vec": vec}
+        _cache[f"en::{name}"] = {"model": model, "vec": vec}
 
-    # DistilBERT
+    for name, paths in BILINGUAL_MODELS.items():
+        model = joblib.load(os.path.join(MODELS_DIR, paths["model"]))
+        vec   = joblib.load(os.path.join(MODELS_DIR, paths["vec"]))
+        _cache[f"bi::{name}"] = {"model": model, "vec": vec}
+
     tokenizer = AutoTokenizer.from_pretrained(HF_REPO)
     bert_model = AutoModelForSequenceClassification.from_pretrained(
         HF_REPO, output_attentions=True
@@ -61,12 +91,25 @@ def load_models():
     bert_model.eval()
     _cache["DistilBERT"] = {"model": bert_model, "tokenizer": tokenizer}
 
+    bi_src = LOCAL_BILINGUAL if os.path.isdir(LOCAL_BILINGUAL) else HF_REPO_BILINGUAL
+    bi_tokenizer = AutoTokenizer.from_pretrained(bi_src)
+    bi_model = AutoModelForSequenceClassification.from_pretrained(
+        bi_src, output_attentions=True
+    )
+    bi_model.eval()
+    _cache["XLM-RoBERTa (Bilingual)"] = {"model": bi_model, "tokenizer": bi_tokenizer}
+
     return _cache
 
+
 # ── Predict ────────────────────────────────────────────────────────────────────
-def predict(text: str, model_name: str = "Logistic Regression (BoW)") -> dict:
+def predict(text: str, model_name: str, lang: str | None = None) -> dict:
     """
     Predicts toxicity for a given text.
+
+    model_name: display name from CLASSICAL_MODELS / BILINGUAL_MODELS, or
+                "DistilBERT" / "DistilBERT Multilingual"
+    lang: 'en' or 'ms'. Auto-detected if None.
 
     Returns:
         {
@@ -74,22 +117,30 @@ def predict(text: str, model_name: str = "Logistic Regression (BoW)") -> dict:
             "confidence": float (0-100),
             "toxic_prob": float (0-1),
             "clean_prob": float (0-1),
-            "model":      str
+            "model":      str,
+            "lang":       str,
         }
     """
     cache = load_models()
 
-    if model_name == "DistilBERT":
-        bert = cache["DistilBERT"]
-        tokenizer  = bert["tokenizer"]
+    if lang is None:
+        lang = detect_language(text)
+
+    if model_name in ("DistilBERT", "XLM-RoBERTa (Bilingual)"):
+        key = model_name
+        bert      = cache[key]
+        tokenizer = bert["tokenizer"]
         bert_model = bert["model"]
 
+        # Preprocess before tokenizing to match training distribution
+        processed = preprocess(text, lang)
+
         inputs = tokenizer(
-            text,
+            processed,
             return_tensors="pt",
             truncation=True,
             max_length=MAX_LEN,
-            padding=True
+            padding=True,
         )
         with torch.no_grad():
             outputs = bert_model(**inputs)
@@ -99,10 +150,14 @@ def predict(text: str, model_name: str = "Logistic Regression (BoW)") -> dict:
         clean_prob = float(probs[0])
 
     else:
-        entry = cache[model_name]
+        is_bilingual = (lang == "ms")
+        cache_key = f"{'bi' if is_bilingual else 'en'}::{model_name}"
+        entry = cache[cache_key]
         model = entry["model"]
         vec   = entry["vec"]
-        transformed = vec.transform([text])
+
+        processed = preprocess(text, lang)
+        transformed = vec.transform([processed])
 
         if hasattr(model, "predict_proba"):
             probs = model.predict_proba(transformed)[0]
@@ -122,37 +177,36 @@ def predict(text: str, model_name: str = "Logistic Regression (BoW)") -> dict:
         "toxic_prob": round(toxic_prob, 4),
         "clean_prob": round(clean_prob, 4),
         "model":      model_name,
+        "lang":       lang,
     }
 
+
 # ── Explain ────────────────────────────────────────────────────────────────────
-def explain(text: str, model_name: str = "Logistic Regression (BoW)",
+def explain(text: str, model_name: str, lang: str | None = None,
             num_features: int = 10) -> list:
     """
     Returns word-level explanation for the prediction.
-
-    For classical models: LIME (word, weight) tuples
-        positive weight = pushes toward toxic
-        negative weight = pushes toward clean
-
-    For DistilBERT: attention weights (token, score) tuples
-        sorted by score descending
-
-    Returns:
-        list of (word/token, score) tuples
+    lang: 'en' or 'ms'. Auto-detected if None.
     """
     cache = load_models()
 
-    if model_name == "DistilBERT":
-        bert      = cache["DistilBERT"]
-        tokenizer = bert["tokenizer"]
+    if lang is None:
+        lang = detect_language(text)
+
+    processed = preprocess(text, lang)
+
+    if model_name in ("DistilBERT", "XLM-RoBERTa (Bilingual)"):
+        key = model_name
+        bert       = cache[key]
+        tokenizer  = bert["tokenizer"]
         bert_model = bert["model"]
 
         inputs = tokenizer(
-            text,
+            processed,
             return_tensors="pt",
             truncation=True,
             max_length=MAX_LEN,
-            padding=True
+            padding=True,
         )
         with torch.no_grad():
             outputs = bert_model(**inputs, output_attentions=True)
@@ -171,14 +225,17 @@ def explain(text: str, model_name: str = "Logistic Regression (BoW)",
         return token_scores[:num_features]
 
     else:
-        entry = cache[model_name]
+        is_bilingual = (lang == "ms")
+        cache_key = f"{'bi' if is_bilingual else 'en'}::{model_name}"
+        entry = cache[cache_key]
         model = entry["model"]
         vec   = entry["vec"]
 
         explainer = LimeTextExplainer(class_names=["Non-Toxic", "Toxic"])
 
         def predict_fn(texts):
-            vecs = vec.transform(texts)
+            preprocessed = [preprocess(t, lang) for t in texts]
+            vecs = vec.transform(preprocessed)
             if hasattr(model, "predict_proba"):
                 return model.predict_proba(vecs)
             else:
@@ -187,11 +244,11 @@ def explain(text: str, model_name: str = "Logistic Regression (BoW)",
                 return np.column_stack([1 - probs, probs])
 
         exp = explainer.explain_instance(
-            text,
+            processed,
             predict_fn,
             num_features=num_features,
             num_samples=500,
-            labels=[1]
+            labels=[1],
         )
         return [(str(word), float(score)) for word, score in exp.as_list(label=1)]
 
@@ -199,17 +256,16 @@ def explain(text: str, model_name: str = "Logistic Regression (BoW)",
 # ── Quick test ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     test_cases = [
-        "you are a stupid idiot and i will kill you",
-        "thank you for your contribution to this article",
+        ("you are a stupid idiot and i will kill you", "en"),
+        ("thank you for your contribution to this article", "en"),
+        ("bodoh sial kau ni, pergi mampus", "ms"),
+        ("terima kasih atas sokongan anda, sangat menghargai", "ms"),
     ]
 
-    for model_name in [*CLASSICAL_MODELS.keys(), "DistilBERT"]:
-        print(f"\n{'='*50}")
+    for model_name in [*CLASSICAL_MODELS.keys(), "DistilBERT", "XLM-RoBERTa (Bilingual)"]:
+        print(f"\n{'='*55}")
         print(f"Model: {model_name}")
-        print(f"{'='*50}")
-        for text in test_cases:
-            result = predict(text, model_name)
-            explanation = explain(text, model_name)
-            print(f"\nText: {text[:50]}")
-            print(f"  → {result['label']} ({result['confidence']:.1f}%)")
-            print(f"  Top words: {explanation[:3]}")
+        print(f"{'='*55}")
+        for text, lang in test_cases:
+            result = predict(text, model_name, lang=lang)
+            print(f"  [{lang}] {text[:45]:<45} -> {result['label']} ({result['confidence']:.1f}%)")

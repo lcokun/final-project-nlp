@@ -1,6 +1,6 @@
 # Toxic Comment Detector
 
-A binary text classification system that detects toxic comments using classical ML models (Logistic Regression, SVM) and DistilBERT, with word-level XAI highlights via LIME and attention weights, served through a Streamlit app.
+A bilingual (English + Malay) toxic comment detection system using classical ML and transformer models, with word-level explainability via LIME and attention weights, served through a Streamlit app.
 
 Built for SAIA 2163 Natural Language Processing, final project.
 
@@ -8,32 +8,53 @@ Built for SAIA 2163 Natural Language Processing, final project.
 
 | Member | Role |
 |--------|------|
-| Amil Hakim | ML pipeline, XAI, DistilBERT fine-tuning |
-| Faris Haziq | Data preprocessing, EDA |
+| Amil Hakim | ML pipeline, bilingual models, XAI, inference module |
+| Faris Haziq | Dataset preprocessing, bilingual corpus, EDA |
 | Irfan Johan | Streamlit app, deployment, poster |
 
 ## Models
 
-Three classical models and one transformer model are available in the app:
+### English
 
-| Model | F1 Score |
-|-------|----------|
-| DistilBERT | 0.9563 |
-| Logistic Regression (BoW) | 0.9036 |
-| SVM (TF-IDF) | 0.8995 |
-| Logistic Regression (TF-IDF) | 0.8980 |
+| Model | Vectorizer | F1 |
+|-------|------------|----|
+| DistilBERT (fine-tuned) | | 0.9563 |
+| Logistic Regression | BoW | 0.9036 |
+| SVM | TF-IDF | 0.8995 |
+| Logistic Regression | TF-IDF | 0.8980 |
+| SVM | BoW | 0.8892 |
+| Naive Bayes | TF-IDF | 0.8797 |
+| Naive Bayes | BoW | 0.8775 |
 
-Pretrained DistilBERT model: https://huggingface.co/lcokun/toxic-comment-distilbert
+### Bilingual (English + Malay)
+
+| Model | Vectorizer | F1 |
+|-------|------------|----|
+| XLM-RoBERTa (fine-tuned) | | 0.90+ |
+| Logistic Regression | BoW | 0.8936 |
+| SVM | TF-IDF | 0.8909 |
+| Logistic Regression | TF-IDF | 0.8895 |
+| SVM | BoW | 0.8917 |
+| Naive Bayes | BoW | 0.8589 |
+| Naive Bayes | TF-IDF | 0.8549 |
+
+Pretrained models on HuggingFace:
+- English DistilBERT: https://huggingface.co/lcokun/toxic-comment-distilbert
+- Bilingual XLM-RoBERTa: https://huggingface.co/lcokun/toxic-comment-xlm-roberta-bilingual
 
 ## Dataset
 
-The Jigsaw Toxic Comment Classification dataset must be downloaded manually from Kaggle.
+**English:** Jigsaw Toxic Comment Classification Challenge (Kaggle)
 
 1. Go to: https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data
 2. Download `train.csv`
-3. Place it in the `data/` folder
+3. Place it in `data/`
 
-A preprocessed balanced corpus (`balanced_corpus.csv`) is included in `data/` for convenience.
+**Bilingual:** A Bilingual Malay-English Social Media Dataset for Binary Hate Speech Detection (13,376 Malay rows from HateM, Toxicity-Small, Snapshot-Twitter-2022, Supervised-Twitter).
+
+Preprocessed balanced corpora are included in the repo:
+- `data/balanced_corpus.csv` -- English only, 30,568 rows (50/50)
+- `Data/balanced_corpus_fixed.csv` -- Bilingual, 42,996 rows (English 50/50 + Malay 50/50 independently balanced)
 
 ## Installation
 
@@ -55,19 +76,42 @@ uv run --no-project streamlit run app.py
 
 ```
 final-project-nlp/
-├── app.py              # Streamlit app
+├── app.py                          # Streamlit app
 ├── requirements.txt
 ├── pyproject.toml
 ├── data/
-│   └── balanced_corpus.csv
-├── models/             # Pretrained classical models (.joblib)
-├── notebooks/          # Jupyter notebook and Colab submission
-├── results/            # Evaluation plots and confusion matrices
+│   └── balanced_corpus.csv         # English balanced corpus
+├── Data/
+│   └── balanced_corpus_fixed.csv   # Bilingual balanced corpus (per-language balanced)
+├── models/                         # Classical model .joblib files (English + bilingual)
+├── notebooks/
+│   ├── Text_preprocessing_checkpoint1_group_amil.ipynb
+│   ├── Text_preprocessing_checkpoint1_MalayEng_ver.ipynb
+│   └── SAIA2163_FinalProject_Colab.ipynb
+├── results/                        # Confusion matrices, comparison charts
 └── src/
-    ├── train_classical.py
+    ├── preprocess.py               # Inference-time preprocessing (EN + MS)
+    ├── inference.py                # predict() and explain() API
+    ├── xai.py                      # LIME and attention weight helpers
+    ├── train_classical.py          # Train English classical models
+    ├── train_classical_bilingual.py
     ├── train_distillbert.py
-    ├── xai.py
-    └── inference.py
+    ├── train_distillbert_bilingual.py
+    ├── train_xlm_roberta_bilingual.py
+    └── rebuild_bilingual_corpus.py
+```
+
+## Inference API
+
+```python
+from src.inference import predict, explain
+
+# language auto-detected
+result = predict("bodoh sial kau ni", "XLM-RoBERTa (Bilingual)")
+# {"label": "Toxic", "confidence": 99.7, "toxic_prob": 0.997, "lang": "ms", ...}
+
+explanation = explain("you are an idiot", "Logistic Regression (BoW)")
+# [(word, weight), ...] — positive weight = pushes toward toxic
 ```
 
 ## Results

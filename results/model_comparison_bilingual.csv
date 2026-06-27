@@ -1,0 +1,7 @@
+model,vectorizer,accuracy,precision,recall,f1
+logistic_regression,bow,0.8937,0.8943,0.8937,0.8936
+svm,tfidf,0.8909,0.8913,0.8909,0.8909
+logistic_regression,tfidf,0.8895,0.8898,0.8895,0.8895
+svm,bow,0.8754,0.8756,0.8754,0.8754
+naive_bayes,bow,0.859,0.8596,0.859,0.8589
+naive_bayes,tfidf,0.855,0.856,0.855,0.8549

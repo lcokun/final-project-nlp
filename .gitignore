@@ -1,11 +1,14 @@
 # data
 data/*.csv
 data/*.zip
+Data/*.csv
 
 # model artifacts
 *.pt
 *.bin
 *.safetensors
+models/distillbert_bilingual/
+models/xlm_roberta_bilingual/
 
 # environments
 .venv/
@@ -20,4 +23,12 @@ __pycache__/
 
 # jupyter
 .ipynb_checkpoints/
+
+# internal docs
+context.md
+project_summary_final.html
+FINAL PROJECT (1).html
+
+# exceptions
 !data/balanced_corpus.csv
+!Data/balanced_corpus_fixed.csv
