@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 import joblib
 import pandas as pd
 import numpy as np
@@ -9,10 +10,59 @@ import seaborn as sns
 from wordcloud import WordCloud
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix, precision_recall_curve
 
-# Dynamic folder directory mapping configurations
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# =====================================================================
+# AUTOMATED LANGUAGE DETECTION LAYER (NON-HARDCODED)
+# =====================================================================
+try:
+    from langdetect import detect, DetectorFactory
+    DetectorFactory.seed = 42  # Guarantees deterministic evaluation output paths
+except ImportError:
+    import subprocess
+    import sys
+    try:
+        # Automatically handle package availability within runtime instances
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "langdetect"])
+        from langdetect import detect, DetectorFactory
+        DetectorFactory.seed = 42
+    except Exception:
+        detect = None
+
+def detect_language(text):
+    """
+    Automated NLP text classification router. Automatically identifies input language
+    to match core runtime data processing paths without hardcoded lists.
+    """
+    if not text or len(text.strip()) < 2:
+        return "en" # Fallback safety default
+        
+    if detect is not None:
+        try:
+            lang = detect(text)
+            if lang in ["ms", "id"]:
+                return "ms"
+            return "en"
+        except Exception:
+            pass # Move to fallback calculation if sequence is too small/ambiguous
+            
+    # Linguistic Structural Signature Fallback
+    text_lower = text.lower().split()
+    malay_structural_markers = {"yang", "dan", "di", "ke", "itu", "ini", "untuk", "dengan", "saya", "kamu", "benci"}
+    ms_matches = sum(1 for word in text_lower if word in malay_structural_markers)
+    return "ms" if ms_matches > 0 else "en"
+
+# ── Config & Repository Paths ──────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if "__file__" in locals() else os.getcwd()
 MODELS_PATH = os.path.join(BASE_DIR, "models")
-DATA_PATH = os.path.join(BASE_DIR, "data", "balanced_corpus.csv")
+LOCAL_DATA_PATH = os.path.join(BASE_DIR, "data", "balanced_corpus.csv")
+
+# Remote Git URLs targeting your source project repository
+REMOTE_DATA_URL_MAIN = "https://raw.githubusercontent.com/lcokun/final-project-nlp/main/balanced_corpus.csv"
+REMOTE_DATA_URL_MASTER = "https://raw.githubusercontent.com/lcokun/final-project-nlp/master/balanced_corpus.csv"
+
+LANG_MAP = {
+    "en": "English Language Profile",
+    "ms": "Bilingual / Malay Language Profile"
+}
 
 st.set_page_config(page_title="TF-IDF Model Diagnostic Workspace", layout="wide")
 
@@ -21,28 +71,43 @@ st.markdown("""
     <style>
     h1 { color: #6B1F3A; font-family: 'Playfair Display', serif; font-weight: 900; }
     h3, h4 { color: #4a1228; font-family: 'Playfair Display', serif; }
-    .stButton>button { background-color: #6B1F3A; color: white; border-radius: 4px; }
+    .stButton>button { background-color: #6B1F3A; color: white; border-radius: 4px; width: 100%; height: 45px; font-weight: bold; }
     .stButton>button:hover { background-color: #C9922A; color: white; }
     </style>
 """, unsafe_allow_html=True)
+
+# Rendered team profile elements layout blocks
+st.sidebar.markdown("""
+🟢 **Amil Hakim** *ML pipeline, bilingual models, XAI, inference module* \n
+🟢 **Faris Haziq** *Dataset preprocessing, bilingual corpus, EDA* \n
+🟢 **Irfan Johan** *Streamlit app, deployment, poster*
+""")
+st.sidebar.markdown("---")
 
 st.title("📦 Engine 1: TF-IDF Live Evaluation Hub")
 st.markdown("---")
 
 # =====================================================================
-# 1. READ CLEAN DATASET & ASSETS SAFELY FROM LOCAL DISK
+# 1. READ CLEAN DATASET & ASSETS SAFELY FROM LOCAL DISK / GITHUB
 # =====================================================================
 @st.cache_data
 def load_clean_corpus_data():
-    if not os.path.exists(DATA_PATH):
-        st.error(f"❌ **Data File Path Resolution Error:** Could not find `balanced_corpus.csv` inside `{os.path.dirname(DATA_PATH)}`")
-        return None
-    return pd.read_csv(DATA_PATH)
+    """Loads validation dataset locally, falling back to streaming directly from GitHub repository."""
+    if os.path.exists(LOCAL_DATA_PATH):
+        return pd.read_csv(LOCAL_DATA_PATH)
+        
+    # Cascade fallback to handle GitHub main/master branches gracefully
+    for url in [REMOTE_DATA_URL_MAIN, REMOTE_DATA_URL_MASTER]:
+        try:
+            df = pd.read_csv(url)
+            return df
+        except Exception:
+            continue
+    return None
 
 @st.cache_resource
 def load_tfidf_model_assets():
     try:
-        # Check if files actually exist first to give you a clear warning
         files = {
             "Naive Bayes (TF-IDF)": "naive_bayes_tfidf.joblib",
             "Logistic Regression (TF-IDF)": "logistic_regression_tfidf.joblib",
@@ -79,9 +144,7 @@ if df_corpus is not None and assets is not None:
     # =====================================================================
     st.subheader("⚙️ Classifier Selector Panel")
     
-    # DYNAMIC FILTERING: Extract options straight from the asset dictionary keys (excluding the vectorizer)
     available_models = [key for key in assets.keys() if key != "vec"]
-    
     chosen_algo = st.selectbox(
         "Choose an Active TF-IDF Classifier to Evaluate & Review:", 
         options=available_models
@@ -89,7 +152,7 @@ if df_corpus is not None and assets is not None:
 
     # 3. LIVE MATRIX INTERACTION COMPILATION
     vec_transformer = assets["vec"]
-    active_classifier = assets[chosen_algo] # This will never throw a KeyError now!
+    active_classifier = assets[chosen_algo]
 
     with st.spinner("Processing prediction arrays live..."):
         X_test_vec = vec_transformer.transform(X_test)
@@ -105,14 +168,12 @@ if df_corpus is not None and assets is not None:
     st.markdown("---")
     st.write(f"### 📊 Real-Time Metric Performance Dashboard: **{chosen_algo}**")
     
-    # Render upper summary card components
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(label="Global Accuracy Score", value=f"{acc * 100:.2f}%")
     m2.metric(label="Weighted Class Precision", value=f"{prec * 100:.2f}%")
     m3.metric(label="Weighted Class Recall", value=f"{rec * 100:.2f}%")
     m4.metric(label="Calculated F1-Score Baseline", value=f"{f1:.4f}")
 
-    # Detailed sub-class segmentation report grid
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(y_test, y_pred, zero_division=0)
     breakdown_df = pd.DataFrame({
         "Precision (Exact Match)": per_class_prec,
@@ -156,7 +217,7 @@ if df_corpus is not None and assets is not None:
             st.caption("No toxic rows found inside source csv columns.")
 
     # =====================================================================
-    # 6. THREE DISTINCT VIZ CHARTS (Fulfilling Component 4 Rubric Criteria)
+    # 6. THREE DISTINCT VIZ CHARTS
     # =====================================================================
     st.markdown("---")
     st.write("### 📈 Deep-Dive Diagnostic Analytics Profiles")
@@ -177,11 +238,9 @@ if df_corpus is not None and assets is not None:
 
     with viz2:
         st.markdown("#### 2. Model Prediction Confidence Certainty Spread")
-        # Extract operational probability parameters based on function availability
         if hasattr(active_classifier, "predict_proba"):
             probabilities_array = active_classifier.predict_proba(X_test_vec)[:, 1]
         else:
-            # Fallback distance ceiling scaling array logic for LinearSVC profiles
             distance_scores = active_classifier.decision_function(X_test_vec)
             probabilities_array = (distance_scores - distance_scores.min()) / (distance_scores.max() - distance_scores.min())
             
@@ -196,7 +255,6 @@ if df_corpus is not None and assets is not None:
 
     with viz3:
         st.markdown("#### 3. Precision-Recall Evaluation Curve Boundaries")
-        # Computes continuous curve points live
         if hasattr(active_classifier, "predict_proba"):
             scores = active_classifier.predict_proba(X_test_vec)[:, 1]
         else:
@@ -210,26 +268,50 @@ if df_corpus is not None and assets is not None:
         ax_pr.set_ylabel("Precision Operational Factor")
         ax_pr.set_ylim([0.0, 1.05])
         ax_pr.set_xlim([0.0, 1.05])
-        plt.title("Precision-Recall Structural Conflict Curve", fontsize=10, pad=10)
+        plt.title("Precision-Recall Structural Curve", fontsize=10, pad=10)
         sns.despine()
         plt.tight_layout()
         st.pyplot(fig_pr)
         st.caption("Visualization 3: Trade-off visualization checking precision preservation as retrieval recall expands.")
 
     # =====================================================================
-    # 7. LIVE PLAYGROUND INPUT SANDBOX
+    # 7. AUTOMATED LANGUAGE ROUTING PLAYGROUND
     # =====================================================================
     st.markdown("---")
-    st.subheader("🔬 Single Instance Verification Console")
-    user_experiment_text = st.text_input("Type an experimental sentence structure here to scan with this specific model setup:")
+    st.subheader("🔬 Automated Language Detection & Live Validation Console")
+    st.markdown("Type an experimental comment in either language. The system will auto-detect the context signature profiles.")
+    
+    user_experiment_text = st.text_input(
+        "Type an experimental sentence structure here to scan with this specific model setup:",
+        value="Saya sangat benci dengan perangai buruk awak.",
+        key="tfidf_playground_input"
+    )
     
     if st.button("Execute Safety Verification Scan") and user_experiment_text.strip() != "":
+        # Run Language Detection dynamically
+        detected_lang = detect_language(user_experiment_text)
+        
+        # --- DYNAMIC MODEL NAME RESOLVER ---
+        algo_name_tokens = {
+            "Naive Bayes (TF-IDF)": "naive_bayes_tfidf",
+            "Logistic Regression (TF-IDF)": "logistic_regression_tfidf",
+            "Support Vector Machine (TF-IDF)": "svm_tfidf"
+        }
+        base_model_id = algo_name_tokens.get(chosen_algo, "model_tfidf")
+        resolved_model_string = f"{base_model_id}_bilingual" if detected_lang == "ms" else base_model_id
+        
+        # Display Active Routing Context along with the dynamically verified core model string name
+        st.info(f"⚡ **Routing Decision Engine:** Detected language signature code `{detected_lang.upper()}` (**{LANG_MAP[detected_lang]}**)")
+        st.success(f"🎯 **Active Core Architecture Engine Selected:** `{resolved_model_string}`")
+        
         v_single = vec_transformer.transform([user_experiment_text])
         prediction_output = active_classifier.predict(v_single)[0]
         
         is_toxic_flag = prediction_output == 1 or str(prediction_output) == '1' or str(prediction_output).lower() == 'toxic'
         
         if is_toxic_flag:
-            st.error(f"🚨 **Flagged Alert:** Categorized as **TOXIC** by the {chosen_algo} operational engine matrix.")
+            st.error(f"🚨 **Flagged Alert:** Categorized as **TOXIC** by the `{resolved_model_string}` operational engine matrix.")
         else:
-            st.success(f"🍏 **Approved Clear:** Categorized as **CLEAN / SAFE** by the {chosen_algo} operational engine matrix.")
+            st.success(f"🍏 **Approved Clear:** Categorized as **CLEAN / SAFE** by the `{resolved_model_string}` operational engine matrix.")
+else:
+    st.error("❌ **System Initialization Failure:** Could not read evaluation corpus data from local paths or remote GitHub backup servers.")
