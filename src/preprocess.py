@@ -1,10 +1,3 @@
-"""
-Inference-time preprocessing that mirrors the training pipeline exactly.
-
-English: clean -> lowercase -> tokenize -> slang_map -> stopword remove -> stem -> lemmatize
-Malay:   clean -> lowercase -> tokenize -> malayslangdict
-"""
-
 import regex
 import nltk
 from nltk.tokenize import RegexpTokenizer

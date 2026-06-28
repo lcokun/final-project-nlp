@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 import joblib
@@ -8,9 +9,9 @@ from lime.lime_text import LimeTextExplainer
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # Config
-BASE         = "/home/mel/final-project-nlp"
-MODELS_DIR   = f"{BASE}/models"
-RESULTS_DIR  = f"{BASE}/results"
+BASE         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODELS_DIR   = os.path.join(BASE, "models")
+RESULTS_DIR  = os.path.join(BASE, "results")
 HF_REPO      = "lcokun/toxic-comment-distilbert"
 
 # Load classical models

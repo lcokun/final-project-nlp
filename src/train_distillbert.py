@@ -31,10 +31,10 @@ EPOCHS = 3
 LR = 2e-5
 SEED = 4
 
-BASE = "/home/mel/final-project-nlp"
-DATA_PATH = f"{BASE}/data/balanced_corpus.csv"
-OUTPUT_DIR = f"{BASE}/models/distillbert"
-RESULTS_DIR = f"{BASE}/results"
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(BASE, "data", "balanced_corpus.csv")
+OUTPUT_DIR = os.path.join(BASE, "models", "distillbert")
+RESULTS_DIR = os.path.join(BASE, "results")
 HF_REPO = "lcokun/toxic-comment-distilbert"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)

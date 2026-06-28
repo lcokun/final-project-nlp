@@ -26,12 +26,12 @@ import seaborn as sns
 MODEL_CHECKPOINT = "xlm-roberta-base"
 MAX_LEN    = 128
 BATCH_SIZE = 16
-EPOCHS     = 3
-LR         = 2e-5
+EPOCHS     = 8
+LR         = 1e-5
 SEED       = 42
 
 BASE        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH   = os.path.join(BASE, "Data", "balanced_corpus_fixed.csv")
+DATA_PATH   = os.path.join(BASE, "data", "balanced_corpus_fixed.csv")
 OUTPUT_DIR  = os.path.join(BASE, "models", "xlm_roberta_bilingual")
 RESULTS_DIR = os.path.join(BASE, "results")
 HF_REPO     = "lcokun/toxic-comment-xlm-roberta-bilingual"
@@ -44,20 +44,18 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 print("Loading data...")
-df = pd.read_csv(DATA_PATH).dropna(subset=["preprocessed_text"])
+df = pd.read_csv(DATA_PATH).dropna(subset=["text"])
 print(f"Dataset: {df.shape[0]} rows | {df['toxic'].value_counts().to_dict()}")
 print(df.groupby(["lang", "toxic"]).size())
 
-X = df["preprocessed_text"].tolist()
-y = df["toxic"].tolist()
-
-X_train, X_temp, y_train, y_temp = train_test_split(
-    X, y, test_size=0.3, random_state=SEED, stratify=y
+# Split at dataframe level to preserve lang column for per-language eval
+df_train, df_temp = train_test_split(
+    df, test_size=0.3, random_state=SEED, stratify=df["toxic"]
 )
-X_val, X_test, y_val, y_test = train_test_split(
-    X_temp, y_temp, test_size=0.5, random_state=SEED, stratify=y_temp
+df_val, df_test = train_test_split(
+    df_temp, test_size=0.5, random_state=SEED, stratify=df_temp["toxic"]
 )
-print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test: {len(X_test)}")
+print(f"Train: {len(df_train)} | Val: {len(df_val)} | Test: {len(df_test)}")
 
 print("Loading tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
@@ -69,14 +67,17 @@ def tokenize(batch):
     )
 
 
-def make_dataset(texts, labels):
-    ds = Dataset.from_dict({"text": texts, "label": labels})
+def make_dataset(dataframe):
+    ds = Dataset.from_dict({
+        "text": dataframe["text"].tolist(),
+        "label": dataframe["toxic"].tolist(),
+    })
     return ds.map(tokenize, batched=True, remove_columns=["text"])
 
 
-train_ds = make_dataset(X_train, y_train)
-val_ds   = make_dataset(X_val,   y_val)
-test_ds  = make_dataset(X_test,  y_test)
+train_ds = make_dataset(df_train)
+val_ds   = make_dataset(df_val)
+test_ds  = make_dataset(df_test)
 
 train_ds.set_format("torch")
 val_ds.set_format("torch")
@@ -105,6 +106,7 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=BATCH_SIZE,
     learning_rate=LR,
     weight_decay=0.01,
+    warmup_ratio=0.1,
     eval_strategy="epoch",
     save_strategy="epoch",
     load_best_model_at_end=True,
@@ -122,25 +124,41 @@ trainer = Trainer(
     train_dataset=train_ds,
     eval_dataset=val_ds,
     compute_metrics=compute_metrics,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
 )
 
 print("Training...")
 trainer.train()
 
-print("Evaluating on test set...")
+# ── Overall test evaluation ───────────────────────────────────────────────────
+print("\nEvaluating on test set...")
 preds_output = trainer.predict(test_ds)
 y_pred = np.argmax(preds_output.predictions, axis=-1)
+y_test = df_test["toxic"].to_numpy()
 
 acc = accuracy_score(y_test, y_pred)
 prec, rec, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="weighted")
 
-print(f"\nTest Results:")
-print(f"Accuracy:  {acc:.4f}")
-print(f"Precision: {prec:.4f}")
-print(f"Recall:    {rec:.4f}")
-print(f"F1:        {f1:.4f}")
+print(f"\nOverall Test Results:")
+print(f"  Accuracy:  {acc:.4f}")
+print(f"  Precision: {prec:.4f}")
+print(f"  Recall:    {rec:.4f}")
+print(f"  F1:        {f1:.4f}")
 
+# ── Per-language evaluation ───────────────────────────────────────────────────
+print("\nPer-language breakdown:")
+langs_test = df_test["lang"].to_numpy()
+for lang in ["en", "ms"]:
+    mask = langs_test == lang
+    if mask.sum() == 0:
+        continue
+    l_acc = accuracy_score(y_test[mask], y_pred[mask])
+    _, _, l_f1, _ = precision_recall_fscore_support(
+        y_test[mask], y_pred[mask], average="weighted", zero_division=0
+    )
+    print(f"  [{lang.upper()}] Accuracy: {l_acc:.4f} | F1: {l_f1:.4f} | n={mask.sum()}")
+
+# ── Confusion matrix ──────────────────────────────────────────────────────────
 cm = confusion_matrix(y_test, y_pred)
 fig, ax = plt.subplots(figsize=(5, 4))
 sns.heatmap(
@@ -156,7 +174,7 @@ plt.tight_layout()
 plt.savefig(os.path.join(RESULTS_DIR, "cm_xlm_roberta_bilingual.png"), dpi=150)
 plt.close()
 
-print("Saving model...")
+print("\nSaving model...")
 trainer.save_model(OUTPUT_DIR)
 tokenizer.save_pretrained(OUTPUT_DIR)
 print(f"Model saved to {OUTPUT_DIR}")

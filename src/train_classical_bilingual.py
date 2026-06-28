@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH   = os.path.join(BASE, "Data", "balanced_corpus.csv")
+DATA_PATH   = os.path.join(BASE, "data", "balanced_corpus.csv")
 MODELS_DIR  = os.path.join(BASE, "models")
 RESULTS_DIR = os.path.join(BASE, "results")
 

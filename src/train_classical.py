@@ -22,10 +22,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 # Paths
-BASE = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = "/home/mel/studies/Y2S2/NLP-SAIA2163/exercise/group-assignment/balanced_corpus.csv"
-MODELS_DIR = "/home/mel/studies/Y2S2/NLP-SAIA2163/exercise/group-assignment/models"
-RESULTS_DIR = "/home/mel/studies/Y2S2/NLP-SAIA2163/exercise/group-assignment/results"
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(BASE, "data", "balanced_corpus.csv")
+MODELS_DIR = os.path.join(BASE, "models")
+RESULTS_DIR = os.path.join(BASE, "results")
 
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)

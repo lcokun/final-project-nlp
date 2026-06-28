@@ -1,8 +1,3 @@
-"""
-Usage:
-    from src.inference import load_models, predict, explain
-"""
-
 import warnings
 from sklearn.exceptions import InconsistentVersionWarning
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
@@ -132,8 +127,12 @@ def predict(text: str, model_name: str, lang: str | None = None) -> dict:
         tokenizer = bert["tokenizer"]
         bert_model = bert["model"]
 
-        # Preprocess before tokenizing to match training distribution
-        processed = preprocess(text, lang)
+        # XLM-RoBERTa Malay was trained on raw text — skip preprocessing for MS.
+        # English side was still preprocessed, so preprocess EN as before.
+        if model_name == "XLM-RoBERTa (Bilingual)" and lang == "ms":
+            processed = text
+        else:
+            processed = preprocess(text, lang)
 
         inputs = tokenizer(
             processed,
@@ -193,7 +192,10 @@ def explain(text: str, model_name: str, lang: str | None = None,
     if lang is None:
         lang = detect_language(text)
 
-    processed = preprocess(text, lang)
+    if model_name == "XLM-RoBERTa (Bilingual)" and lang == "ms":
+        processed = text
+    else:
+        processed = preprocess(text, lang)
 
     if model_name in ("DistilBERT", "XLM-RoBERTa (Bilingual)"):
         key = model_name

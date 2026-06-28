@@ -31,7 +31,7 @@ LR         = 2e-5
 SEED       = 42
 
 BASE        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH   = os.path.join(BASE, "Data", "balanced_corpus_fixed.csv")
+DATA_PATH   = os.path.join(BASE, "data", "balanced_corpus_fixed.csv")
 OUTPUT_DIR  = os.path.join(BASE, "models", "distillbert_bilingual")
 RESULTS_DIR = os.path.join(BASE, "results")
 HF_REPO     = "lcokun/toxic-comment-distilbert-bilingual"
