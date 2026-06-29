@@ -17,6 +17,8 @@ A bilingual (English + Malay) toxic comment detection system using classical ML 
 
 Built for SAIA 2163 Natural Language Processing, final project.
 
+**Live demo:** https://huggingface.co/spaces/lcokun/nlp-showcase
+
 ## Team
 
 | Member | Role |
@@ -45,9 +47,9 @@ Built for SAIA 2163 Natural Language Processing, final project.
 |-------|------------|----|
 | XLM-RoBERTa (fine-tuned) | | 0.90+ |
 | Logistic Regression | BoW | 0.8936 |
+| SVM | BoW | 0.8917 |
 | SVM | TF-IDF | 0.8909 |
 | Logistic Regression | TF-IDF | 0.8895 |
-| SVM | BoW | 0.8917 |
 | Naive Bayes | BoW | 0.8589 |
 | Naive Bayes | TF-IDF | 0.8549 |
 
@@ -65,9 +67,8 @@ Pretrained models on HuggingFace:
 
 **Bilingual:** A Bilingual Malay-English Social Media Dataset for Binary Hate Speech Detection (13,376 Malay rows from HateM, Toxicity-Small, Snapshot-Twitter-2022, Supervised-Twitter).
 
-Preprocessed balanced corpora are included in the repo:
-- `data/balanced_corpus.csv` -- English only, 30,568 rows (50/50)
-- `Data/balanced_corpus_fixed.csv` -- Bilingual, 42,996 rows (English 50/50 + Malay 50/50 independently balanced)
+Preprocessed balanced corpus included in the repo:
+- `data/balanced_corpus.csv` — English only, 30,568 rows (50/50 balanced)
 
 ## Installation
 
@@ -79,23 +80,25 @@ cd final-project-nlp
 uv sync
 ```
 
-## Running the app
+## Running the app locally
 
 ```bash
-uv run --no-project streamlit run Dashboard.py
+uv run streamlit run Dashboard.py
 ```
 
 ## Repository structure
 
 ```
 final-project-nlp/
-├── Dashboard.py                    # Streamlit app
+├── Dashboard.py                    # Streamlit app entry point
+├── pages/
+│   ├── Bert.py                     # DistilBERT / XLM-RoBERTa evaluation page
+│   ├── BoW.py                      # Bag-of-Words model evaluation page
+│   └── TF-IDF.py                   # TF-IDF model evaluation page
 ├── requirements.txt
 ├── pyproject.toml
 ├── data/
 │   └── balanced_corpus.csv         # English balanced corpus
-├── Data/
-│   └── balanced_corpus_fixed.csv   # Bilingual balanced corpus (per-language balanced)
 ├── models/                         # Classical model .joblib files (English + bilingual)
 ├── notebooks/
 │   ├── Text_preprocessing_checkpoint1_group_amil.ipynb
