@@ -82,14 +82,14 @@ uv sync
 ## Running the app
 
 ```bash
-uv run --no-project streamlit run app.py
+uv run --no-project streamlit run Dashboard.py
 ```
 
 ## Repository structure
 
 ```
 final-project-nlp/
-├── app.py                          # Streamlit app
+├── Dashboard.py                    # Streamlit app
 ├── requirements.txt
 ├── pyproject.toml
 ├── data/
