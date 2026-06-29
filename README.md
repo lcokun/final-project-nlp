@@ -1,3 +1,16 @@
+---
+title: Toxic Comment Detection System
+emoji: 🛡️
+colorFrom: red
+colorTo: yellow
+sdk: streamlit
+sdk_version: 1.40.0
+app_file: Dashboard.py
+python_version: "3.11"
+pinned: false
+license: mit
+---
+
 # Toxic Comment Detector
 
 A bilingual (English + Malay) toxic comment detection system using classical ML and transformer models, with word-level explainability via LIME and attention weights, served through a Streamlit app.
