@@ -13,7 +13,7 @@ from sklearn.exceptions import InconsistentVersionWarning
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
 # =====================================================================
-# AUTOMATED LANGUAGE DETECTION LAYER (NON-HARDCODED)
+# AUTOMATED DEPENDENCY DETECTION LAYER (NON-HARDCODED)
 # =====================================================================
 try:
     from langdetect import detect, DetectorFactory
@@ -28,6 +28,19 @@ except ImportError:
         DetectorFactory.seed = 42
     except Exception:
         detect = None
+
+try:
+    from wordcloud import WordCloud, STOPWORDS
+except ImportError:
+    import subprocess
+    import sys
+    try:
+        # Automatically handle wordcloud availability within runtime instances
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "wordcloud"])
+        from wordcloud import WordCloud, STOPWORDS
+    except Exception:
+        WordCloud = None
+        STOPWORDS = None
 
 def detect_language(text):
     """
@@ -57,16 +70,11 @@ def preprocess(text, lang):
 
 # ── Config & Repository Paths ──────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if "__file__" in locals() else os.getcwd()
-LOCAL_DATA_PATH = os.path.join(BASE_DIR, "data", "balanced_corpus.csv")
-
-# Remote Git URLs targeting your source project repository
-REMOTE_DATA_URL_MAIN = "https://raw.githubusercontent.com/lcokun/final-project-nlp/main/balanced_corpus.csv"
-REMOTE_DATA_URL_MASTER = "https://raw.githubusercontent.com/lcokun/final-project-nlp/master/balanced_corpus.csv"
+MAX_LEN = 128
 
 HF_REPO_EN = "lcokun/toxic-comment-distilbert"          
 HF_REPO_BI = "lcokun/toxic-comment-xlm-roberta-bilingual" 
 LOCAL_BILINGUAL = os.path.join(BASE_DIR, "models", "xlm_roberta_bilingual")
-MAX_LEN = 128
 
 LANG_MAP = {
     "en": "DistilBERT (English-Only Core Engine)",
@@ -93,7 +101,7 @@ st.sidebar.markdown("""
 """)
 st.sidebar.markdown("---")
 
-st.title("🔬 Engine 3: Deep Learning Transformer Models Workspace")
+st.title("Engine 1: Deep Learning Transformer Models")
 st.markdown("---")
 
 # =====================================================================
@@ -119,12 +127,17 @@ def load_transformer_models():
     return cache
 
 @st.cache_data
-def load_clean_evaluation_data():
+def load_clean_evaluation_data(filename):
     """Loads validation dataset locally, falling back to streaming directly from GitHub repository."""
-    if os.path.exists(LOCAL_DATA_PATH):
-        return pd.read_csv(LOCAL_DATA_PATH)
+    local_path = os.path.join(BASE_DIR, "data", filename)
+    if os.path.exists(local_path):
+        return pd.read_csv(local_path)
         
-    for url in [REMOTE_DATA_URL_MAIN, REMOTE_DATA_URL_MASTER]:
+    urls = [
+        f"https://raw.githubusercontent.com/lcokun/final-project-nlp/main/{filename}",
+        f"https://raw.githubusercontent.com/lcokun/final-project-nlp/master/{filename}"
+    ]
+    for url in urls:
         try:
             df = pd.read_csv(url)
             return df
@@ -132,16 +145,45 @@ def load_clean_evaluation_data():
             continue
     return None
 
-# Load underlying dataset and transformer caches
-df_corpus = load_clean_evaluation_data()
+@st.cache_data
+def generate_class_wordcloud(df, text_column, label_column, target_class, colormap):
+    """Generates a contextual word cloud filtered specifically by a target binary class."""
+    if WordCloud is None:
+        return None
+    
+    # Filter text space strictly by class assignment metrics
+    subset_df = df[df[label_column] == target_class]
+    if subset_df.empty:
+        return None
+        
+    combined_text = " ".join(subset_df[text_column].dropna().astype(str).tolist())
+    if not combined_text.strip():
+        return None
+    
+    custom_stopwords = set(STOPWORDS)
+    custom_stopwords.update(["rt", "amp", "user", "url"]) 
+    
+    wc = WordCloud(
+        width=600, 
+        height=350, 
+        background_color="white", 
+        max_words=250, 
+        stopwords=custom_stopwords,
+        colormap=colormap,
+        random_state=42
+    ).generate(combined_text)
+    
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    ax.imshow(wc, interpolation="bilinear")
+    ax.axis("off")
+    plt.tight_layout(pad=0)
+    return fig
+
+# Load underlying transformer caches
 with st.spinner("Initializing neural model pipelines and processing checkpoints..."):
     model_cache = load_transformer_models()
 
-if df_corpus is not None and model_cache is not None:
-    # Safely identify dataset structural columns
-    text_col = "comment_text" if "comment_text" in df_corpus.columns else df_corpus.columns[0]
-    label_col = "is_toxic" if "is_toxic" in df_corpus.columns else df_corpus.columns[1]
-
+if model_cache is not None:
     # =====================================================================
     # 2. INTERACTIVE SELECTBOX HUB CONTROLS
     # =====================================================================
@@ -151,197 +193,246 @@ if df_corpus is not None and model_cache is not None:
         options=list(model_cache.keys())
     )
 
-    # Resolve active selected assets
-    active_assets = model_cache[chosen_algo]
-    active_model = active_assets["model"]
-    active_tokenizer = active_assets["tokenizer"]
-    target_lang_key = active_assets["lang_key"]
-    active_repo_id = active_assets["repo_id"]
+    # Dynamically select corpus file based on the active chosen architecture
+    if chosen_algo == "DistilBERT (English-Only)":
+        target_file = "balanced_corpus.csv"
+    else:
+        target_file = "balanced_corpus_fixed.csv"
 
-    # =====================================================================
-    # 3. DYNAMIC PERFORMANCE BENCHMARKS GENERATION FOR THE CHOSEN MODEL
-    # =====================================================================
-    @st.cache_data
-    def compile_specific_model_metrics(chosen_model_name):
-        # Slice compilation validation sample array size to maintain interactive UI load speeds
-        sample_size = min(len(df_corpus), 100)
-        eval_df = df_corpus.sample(sample_size, random_state=42)
-        
-        texts = eval_df[text_col].astype(str).tolist()
-        y_true_labels = eval_df[label_col].tolist()
-        
-        y_pred_labels = []
-        predicted_probabilities = []
-        
-        # Pull specific internal structures
-        local_assets = model_cache[chosen_model_name]
-        loc_tokenizer = local_assets["tokenizer"]
-        loc_model = local_assets["model"]
-        loc_lang = local_assets["lang_key"]
-        
-        for t_item in texts:
-            p_text = t_item if (loc_lang == "ms") else preprocess(t_item, loc_lang)
-            tokens_in = loc_tokenizer(p_text, return_tensors="pt", truncation=True, max_length=MAX_LEN, padding=True)
+    # Load file matched to selected architecture selection
+    df_corpus = load_clean_evaluation_data(target_file)
+
+    if df_corpus is not None:
+        # Safely identify dataset structural columns
+        text_col = "comment_text" if "comment_text" in df_corpus.columns else df_corpus.columns[0]
+        label_col = "is_toxic" if "is_toxic" in df_corpus.columns else df_corpus.columns[1]
+
+        # Resolve active selected assets
+        active_assets = model_cache[chosen_algo]
+        active_model = active_assets["model"]
+        active_tokenizer = active_assets["tokenizer"]
+        target_lang_key = active_assets["lang_key"]
+        active_repo_id = active_assets["repo_id"]
+
+        # =====================================================================
+        # 3. DYNAMIC PERFORMANCE BENCHMARKS GENERATION FOR THE CHOSEN MODEL
+        # =====================================================================
+        @st.cache_data
+        def compile_specific_model_metrics(chosen_model_name, filename):
+            # Load localized dataframe instance matching selection scope
+            local_df = load_clean_evaluation_data(filename)
             
+            # Slice compilation validation sample array size to 500 as specified
+            sample_size = min(len(local_df), 500)
+            eval_df = local_df.sample(sample_size, random_state=42)
+
+            t_col = "comment_text" if "comment_text" in local_df.columns else local_df.columns[0]
+            l_col = "is_toxic" if "is_toxic" in local_df.columns else local_df.columns[1]
+
+            texts = eval_df[t_col].astype(str).tolist()
+            y_true_labels = eval_df[l_col].tolist()
+            
+            y_pred_labels = []
+            predicted_probabilities = []
+            
+            # Pull specific internal structures
+            local_assets = model_cache[chosen_model_name]
+            loc_tokenizer = local_assets["tokenizer"]
+            loc_model = local_assets["model"]
+            loc_lang = local_assets["lang_key"]
+            
+            for t_item in texts:
+                p_text = t_item if (loc_lang == "ms") else preprocess(t_item, loc_lang)
+                tokens_in = loc_tokenizer(p_text, return_tensors="pt", truncation=True, max_length=MAX_LEN, padding=True)
+                
+                with torch.no_grad():
+                    logits_out = loc_model(**tokens_in)
+                    
+                s_probs = torch.softmax(logits_out.logits, dim=-1)[0].cpu().numpy()
+                predicted_probabilities.append(float(s_probs[1]))
+                y_pred_labels.append(1 if s_probs[1] >= 0.5 else 0)
+                
+            return np.array(y_true_labels), np.array(y_pred_labels), np.array(predicted_probabilities)
+
+        with st.spinner(f"Compiling evaluation predictions tensor validation slice for {chosen_algo}..."):
+            y_true_real, y_pred_real, probs_real = compile_specific_model_metrics(chosen_algo, target_file)
+
+        # =====================================================================
+        # 4. CHOSEN CLASSIFIER LIVE METRICS DASHBOARD
+        # =====================================================================
+        st.markdown("---")
+        st.write(f"### 📊 Metric Performance for: **{chosen_algo}**")
+        
+        acc = accuracy_score(y_true_real, y_pred_real)
+        prec, rec, f1, _ = precision_recall_fscore_support(y_true_real, y_pred_real, average='weighted', zero_division=0)
+
+        # Render summary metrics cards
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(label="Calculated Global Accuracy", value=f"{acc * 100:.2f}%")
+        m2.metric(label="Weighted Class Precision", value=f"{prec * 100:.2f}%")
+        m3.metric(label="Weighted Class Recall", value=f"{rec * 100:.2f}%")
+        m4.metric(label="Calculated F1-Score Metric", value=f"{f1:.4f}")
+
+        # Detailed report data table 
+        per_class_p, per_class_r, per_class_f, _ = precision_recall_fscore_support(y_true_real, y_pred_real, zero_division=0)
+        breakdown_df = pd.DataFrame({
+            "Precision (Exact Match)": per_class_p,
+            "Recall (Catch Bounds)": per_class_r,
+            "Calculated F1-Score": per_class_f
+        }, index=["Clean / Compliant (Class 0)", "Toxic / Flagged (Class 1)"])
+        st.dataframe(breakdown_df.style.background_gradient(cmap="Blues", axis=1), use_container_width=True)
+
+        # =====================================================================
+        # SPLIT DUAL WORD CLOUD INJECTION
+        # =====================================================================
+        st.markdown("---")
+        st.write(f"### ☁️ Corpus Linguistic Distribution Word Clouds (`{target_file}`)")
+        
+        with st.spinner(f"Rendering categorical word cloud layout sheets from {target_file}..."):
+            wc_col1, wc_col2 = st.columns(2)
+            
+            with wc_col1:
+                st.markdown("<h5 style='color: #2E7D32; text-align: center;'>🍏 Clean / Compliant Sub-Corpus (Class 0)</h5>", unsafe_allow_html=True)
+                fig_clean = generate_class_wordcloud(df_corpus, text_col, label_col, target_class=0, colormap="crest")
+                if fig_clean is not None:
+                    st.pyplot(fig_clean)
+                else:
+                    st.caption("Insufficient document arrays to map standard compliance indicators.")
+                    
+            with wc_col2:
+                st.markdown("<h5 style='color: #C62828; text-align: center;'>🚨 Toxic / Flagged Sub-Corpus (Class 1)</h5>", unsafe_allow_html=True)
+                fig_toxic = generate_class_wordcloud(df_corpus, text_col, label_col, target_class=1, colormap="flare")
+                if fig_toxic is not None:
+                    st.pyplot(fig_toxic)
+                else:
+                    st.caption("Insufficient document arrays to map targeted toxicity structural markers.")
+
+        # =====================================================================
+        # 5. THREE DISTINCT DIAGNOSTIC VIZ CHARTS
+        # =====================================================================
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 📈 Model Diagnostic Graphical Matrix Sheets")
+        viz1, viz2, viz3 = st.columns(3)
+        
+        with viz1:
+            st.markdown("##### 1. Confusion Matrix Heatmap")
+            cm = confusion_matrix(y_true_real, y_pred_real)
+            fig_cm, ax_cm = plt.subplots(figsize=(4.5, 4))
+            sns.heatmap(cm, annot=True, fmt="d", cmap="BuPu", cbar=False,
+                        xticklabels=["Predicted Clean", "Predicted Toxic"],
+                        yticklabels=["Actual Clean", "Actual Toxic"], ax=ax_cm)
+            plt.title(f"Confusion Matrix Details\n({chosen_algo})", fontsize=10, pad=10)
+            plt.tight_layout()
+            st.pyplot(fig_cm)
+            st.caption("Visualization 1: Map checking positive model hits against false indicators.")
+
+        with viz2:
+            st.markdown("##### 2. Model Prediction Confidence Spread")
+            fig_dist, ax_dist = plt.subplots(figsize=(4.5, 4))
+            sns.histplot(probs_real, bins=15, kde=True, color="#6B1F3A", ax=ax_dist)
+            ax_dist.set_xlabel("Assigned Toxicity Risk Score Factor")
+            ax_dist.set_ylabel("Document Index Counts")
+            plt.title("Toxicity Prediction Confidence Spread", fontsize=10, pad=10)
+            plt.tight_layout()
+            st.pyplot(fig_dist)
+            st.caption("Visualization 2: Density layout checking certainty factors mapping model choices.")
+
+        with viz3:
+            st.markdown("##### 3. Precision-Recall Curve Boundaries")
+            precision_array, recall_array, _ = precision_recall_curve(y_true_real, probs_real)
+            fig_pr, ax_pr = plt.subplots(figsize=(4.5, 4))
+            ax_pr.plot(recall_array, precision_array, color="#C9922A", lw=2, label="PR Boundary")
+            ax_pr.set_xlabel("Recall Factor")
+            ax_pr.set_ylabel("Precision Factor")
+            ax_pr.set_ylim([0.0, 1.05])
+            ax_pr.set_xlim([0.0, 1.05])
+            plt.title("Precision-Recall Structural Curve", fontsize=10, pad=10)
+            sns.despine()
+            plt.tight_layout()
+            st.pyplot(fig_pr)
+            st.caption("Visualization 3: Trade-off calculation checking precision retention as recall bounds scale.")
+
+        # =====================================================================
+        # 6. AUTOMATED LANGUAGE ROUTING PLAYGROUND (BOTTOM OF PANEL)
+        # =====================================================================
+        st.markdown("---")
+        st.subheader("🔬 Automated Language Detection & Live Validation")
+        st.markdown("Type a comment in either **English** or **Malay**. The system will automatically route it through the matching specialized transformer engine.")
+
+        # Dynamically set initial statement variations corresponding to active architecture requirements
+        if chosen_algo == "DistilBERT (English-Only)":
+            dynamic_placeholder = "You are completely useless and everything you say is absolute nonsense."
+        else:
+            dynamic_placeholder = "I really think your management style tu sangat teruk as f*ck."
+
+        user_experiment_text = st.text_input(
+            "Type your validation text statement directly below:",
+            value=dynamic_placeholder,
+            key=f"transformer_playground_input_{chosen_algo}" # Appended unique architectural keys to force widget refreshes on algorithm swap
+        )
+
+        if st.button("Execute Intelligent Routing Scan") and user_experiment_text.strip() != "":
+            # 1. Run automated langdetect checking mechanisms
+            detected_lang = detect_language(user_experiment_text)
+            
+            # 2. Pull correct operational model elements based on live routing choices
+            playground_assets = model_cache["XLM-RoBERTa (Bilingual)"] if detected_lang == "ms" else model_cache["DistilBERT (English-Only)"]
+            p_tokenizer = playground_assets["tokenizer"]
+            p_model = playground_assets["model"]
+            p_repo_id = playground_assets["repo_id"]
+
+            # 3. Single sentence matrix inference calculations
+            processed_play_text = user_experiment_text if (detected_lang == "ms") else preprocess(user_experiment_text, detected_lang)
+            play_inputs = p_tokenizer(processed_play_text, return_tensors="pt", truncation=True, max_length=MAX_LEN, padding=True)
+
             with torch.no_grad():
-                logits_out = loc_model(**tokens_in)
-                
-            s_probs = torch.softmax(logits_out.logits, dim=-1)[0].cpu().numpy()
-            predicted_probabilities.append(float(s_probs[1]))
-            y_pred_labels.append(1 if s_probs[1] >= 0.5 else 0)
+                play_outputs = p_model(**play_inputs, output_attentions=True)
+
+            play_probs = torch.softmax(play_outputs.logits, dim=-1)[0].cpu().numpy()
+            clean_prob = float(play_probs[0])
+            toxic_prob = float(play_probs[1])
+
+            label = "Toxic" if toxic_prob >= 0.5 else "Non-Toxic"
+            confidence = toxic_prob * 100 if label == "Toxic" else clean_prob * 100
+
+            # Display Playground Output Fields
+            st.markdown("### 🎯 Real-Time Classification Results")
+            col_res1, col_res2 = st.columns([2, 3])
             
-        return np.array(y_true_labels), np.array(y_pred_labels), np.array(predicted_probabilities)
+            with col_res1:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if label == "Toxic":
+                    st.error(f"🚨 **Flagged Alert:** Categorized as **TOXIC** by `{p_repo_id}` ({confidence:.2f}% risk weight assigned).")
+                else:
+                    st.success(f"🍏 **Approved Clear:** Categorized as **CLEAN / SAFE** by `{p_repo_id}` ({confidence:.2f}% validation score).")
+                    
+                st.metric(label="Toxicity Confidence Score", value=f"{toxic_prob * 100:.2f}%")
+                st.metric(label="Safety/Clean Compliance Score", value=f"{clean_prob * 100:.2f}%")
 
-    with st.spinner(f"Compiling evaluation predictions tensor validation slice for {chosen_algo}..."):
-        y_true_real, y_pred_real, probs_real = compile_specific_model_metrics(chosen_algo)
+            with col_res2:
+                st.markdown("#### ⚡ Token Attention Alignment Weights")
+                last_attn = play_outputs.attentions[-1]
+                avg_attn = last_attn[0].mean(dim=0)
+                cls_attn = avg_attn[0].cpu().numpy()
 
-    # =====================================================================
-    # 4. CHOSEN CLASSIFIER LIVE METRICS DASHBOARD
-    # =====================================================================
-    st.markdown("---")
-    st.write(f"### 📊 Real-Time Metric Performance Dashboard: **{chosen_algo}**")
-    
-    acc = accuracy_score(y_true_real, y_pred_real)
-    prec, rec, f1, _ = precision_recall_fscore_support(y_true_real, y_pred_real, average='weighted', zero_division=0)
+                tokens = p_tokenizer.convert_ids_to_tokens(play_inputs["input_ids"][0])
+                token_scores = [
+                    (tok, float(score))
+                    for tok, score in zip(tokens, cls_attn)
+                    if tok not in ("[CLS]", "[SEP]", "[PAD]", "<s>", "</s>", "<pad>")
+                ]
+                token_scores.sort(key=lambda x: x[1], reverse=True)
 
-    # Render summary metrics cards
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(label="Calculated Global Accuracy", value=f"{acc * 100:.2f}%")
-    m2.metric(label="Weighted Class Precision", value=f"{prec * 100:.2f}%")
-    m3.metric(label="Weighted Class Recall", value=f"{rec * 100:.2f}%")
-    m4.metric(label="Calculated F1-Score Metric", value=f"{f1:.4f}")
-
-    # Detailed report data table 
-    per_class_p, per_class_r, per_class_f, _ = precision_recall_fscore_support(y_true_real, y_pred_real, zero_division=0)
-    breakdown_df = pd.DataFrame({
-        "Precision (Exact Match)": per_class_p,
-        "Recall (Catch Bounds)": per_class_r,
-        "Calculated F1-Score": per_class_f
-    }, index=["Clean / Compliant (Class 0)", "Toxic / Flagged (Class 1)"])
-    st.dataframe(breakdown_df.style.background_gradient(cmap="Blues", axis=1), use_container_width=True)
-
-    # =====================================================================
-    # 5. THREE DISTINCT DIAGNOSTIC VIZ CHARTS
-    # =====================================================================
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 📈 Model Diagnostic Graphical Matrix Sheets")
-    viz1, viz2, viz3 = st.columns(3)
-    
-    with viz1:
-        st.markdown("##### 1. Confusion Matrix Heatmap")
-        cm = confusion_matrix(y_true_real, y_pred_real)
-        fig_cm, ax_cm = plt.subplots(figsize=(4.5, 4))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="BuPu", cbar=False,
-                    xticklabels=["Predicted Clean", "Predicted Toxic"],
-                    yticklabels=["Actual Clean", "Actual Toxic"], ax=ax_cm)
-        plt.title(f"Confusion Matrix Details\n({chosen_algo})", fontsize=10, pad=10)
-        plt.tight_layout()
-        st.pyplot(fig_cm)
-        st.caption("Visualization 1: Map checking positive model hits against false indicators.")
-
-    with viz2:
-        st.markdown("##### 2. Model Prediction Confidence Spread")
-        fig_dist, ax_dist = plt.subplots(figsize=(4.5, 4))
-        sns.histplot(probs_real, bins=15, kde=True, color="#6B1F3A", ax=ax_dist)
-        ax_dist.set_xlabel("Assigned Toxicity Risk Score Factor")
-        ax_dist.set_ylabel("Document Index Counts")
-        plt.title("Toxicity Prediction Confidence Spread", fontsize=10, pad=10)
-        plt.tight_layout()
-        st.pyplot(fig_dist)
-        st.caption("Visualization 2: Density layout checking certainty factors mapping model choices.")
-
-    with viz3:
-        st.markdown("##### 3. Precision-Recall Curve Boundaries")
-        precision_array, recall_array, _ = precision_recall_curve(y_true_real, probs_real)
-        fig_pr, ax_pr = plt.subplots(figsize=(4.5, 4))
-        ax_pr.plot(recall_array, precision_array, color="#C9922A", lw=2, label="PR Boundary")
-        ax_pr.set_xlabel("Recall Factor")
-        ax_pr.set_ylabel("Precision Factor")
-        ax_pr.set_ylim([0.0, 1.05])
-        ax_pr.set_xlim([0.0, 1.05])
-        plt.title("Precision-Recall Structural Curve", fontsize=10, pad=10)
-        sns.despine()
-        plt.tight_layout()
-        st.pyplot(fig_pr)
-        st.caption("Visualization 3: Trade-off calculation checking precision retention as recall bounds scale.")
-
-    # =====================================================================
-    # 6. AUTOMATED LANGUAGE ROUTING PLAYGROUND (BOTTOM OF PANEL)
-    # =====================================================================
-    st.markdown("---")
-    st.subheader("🔬 Automated Language Detection & Live Validation Console")
-    st.markdown("Type a comment in either **English** or **Malay**. The system will automatically route it through the matching specialized transformer engine.")
-
-    user_experiment_text = st.text_input(
-        "Type your validation text statement directly below:",
-        value="Saya sangat benci dengan perangai buruk awak.",
-        key="transformer_playground_input"
-    )
-
-    if st.button("Execute Intelligent Routing Scan") and user_experiment_text.strip() != "":
-        # 1. Run automated langdetect checking mechanisms
-        detected_lang = detect_language(user_experiment_text)
-        
-        # 2. Pull correct operational model elements based on live routing choices
-        playground_assets = model_cache["XLM-RoBERTa (Bilingual)"] if detected_lang == "ms" else model_cache["DistilBERT (English-Only)"]
-        p_tokenizer = playground_assets["tokenizer"]
-        p_model = playground_assets["model"]
-        p_repo_id = playground_assets["repo_id"]
-
-        # Render Active Routing engine diagnostics alert blocks
-        st.info(f"⚡ **Routing Decision Engine:** Detected language code `{detected_lang.upper()}`. Connecting live to architecture target: **{LANG_MAP[detected_lang]}**")
-        st.success(f"🎯 **Active Core Architecture Engine Selected:** `{p_repo_id}`")
-
-        # 3. Single sentence matrix inference calculations
-        processed_play_text = user_experiment_text if (detected_lang == "ms") else preprocess(user_experiment_text, detected_lang)
-        play_inputs = p_tokenizer(processed_play_text, return_tensors="pt", truncation=True, max_length=MAX_LEN, padding=True)
-
-        with torch.no_grad():
-            play_outputs = p_model(**play_inputs, output_attentions=True)
-
-        play_probs = torch.softmax(play_outputs.logits, dim=-1)[0].cpu().numpy()
-        clean_prob = float(play_probs[0])
-        toxic_prob = float(play_probs[1])
-
-        label = "Toxic" if toxic_prob >= 0.5 else "Non-Toxic"
-        confidence = toxic_prob * 100 if label == "Toxic" else clean_prob * 100
-
-        # Display Playground Output Fields
-        st.markdown("### 🎯 Real-Time Classification Results")
-        col_res1, col_res2 = st.columns([2, 3])
-        
-        with col_res1:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if label == "Toxic":
-                st.error(f"🚨 **Flagged Alert:** Categorized as **TOXIC** by `{p_repo_id}` ({confidence:.2f}% risk weight assigned).")
-            else:
-                st.success(f"🍏 **Approved Clear:** Categorized as **CLEAN / SAFE** by `{p_repo_id}` ({confidence:.2f}% validation score).")
-                
-            st.metric(label="Toxicity Confidence Score", value=f"{toxic_prob * 100:.2f}%")
-            st.metric(label="Safety/Clean Compliance Score", value=f"{clean_prob * 100:.2f}%")
-
-        with col_res2:
-            st.markdown("#### ⚡ Token Attention Alignment Weights")
-            last_attn = play_outputs.attentions[-1]
-            avg_attn = last_attn[0].mean(dim=0)
-            cls_attn = avg_attn[0].cpu().numpy()
-
-            tokens = p_tokenizer.convert_ids_to_tokens(play_inputs["input_ids"][0])
-            token_scores = [
-                (tok, float(score))
-                for tok, score in zip(tokens, cls_attn)
-                if tok not in ("[CLS]", "[SEP]", "[PAD]", "<s>", "</s>", "<pad>")
-            ]
-            token_scores.sort(key=lambda x: x[1], reverse=True)
-
-            if token_scores:
-                top_slice = token_scores[:10]
-                fig_a, ax_a = plt.subplots(figsize=(7, 3.5))
-                ax_a.barh([t[0] for t in top_slice][::-1], [t[1] for t in top_slice][::-1], color="#7F77DD" if detected_lang == "en" else "#E67E22")
-                ax_a.set_xlabel("Averaged Attention Interaction Weight (Classification Layer)")
-                plt.tight_layout()
-                st.pyplot(fig_a)
-            else:
-                st.caption("Insufficient valid text tokens to plot attention context maps.")
+                if token_scores:
+                    top_slice = token_scores[:10]
+                    fig_a, ax_a = plt.subplots(figsize=(7, 3.5))
+                    ax_a.barh([t[0] for t in top_slice][::-1], [t[1] for t in top_slice][::-1], color="#7F77DD" if detected_lang == "en" else "#E67E22")
+                    ax_a.set_xlabel("Averaged Attention Interaction Weight (Classification Layer)")
+                    plt.tight_layout()
+                    st.pyplot(fig_a)
+                else:
+                    st.caption("Insufficient valid text tokens to plot attention context maps.")
+    else:
+        st.error("❌ **System Initialization Failure:** Could not read evaluation corpus data from local paths or remote GitHub backup servers.")
 else:
-    st.error("❌ **System Initialization Failure:** Could not read evaluation corpus data from local paths or remote GitHub backup servers.")
+    st.error("❌ **System Initialization Failure:** Could not initialize model cache checkpoints.")

@@ -53,11 +53,6 @@ def detect_language(text):
 # ── Config & Repository Paths ──────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if "__file__" in locals() else os.getcwd()
 MODELS_PATH = os.path.join(BASE_DIR, "models")
-LOCAL_DATA_PATH = os.path.join(BASE_DIR, "data", "balanced_corpus.csv")
-
-# Remote Git URLs targeting your source project repository
-REMOTE_DATA_URL_MAIN = "https://raw.githubusercontent.com/lcokun/final-project-nlp/main/balanced_corpus.csv"
-REMOTE_DATA_URL_MASTER = "https://raw.githubusercontent.com/lcokun/final-project-nlp/master/balanced_corpus.csv"
 
 LANG_MAP = {
     "en": "English Language Profile",
@@ -84,20 +79,42 @@ st.sidebar.markdown("""
 """)
 st.sidebar.markdown("---")
 
-st.title("📦 Engine 1: Bag-of-Words (BoW) Live Evaluation Hub")
+# =====================================================================
+# SIDEBAR INTERACTIVE TIERS CONTROL
+# =====================================================================
+st.sidebar.header("🛠️ Language Scope Control")
+model_tier = st.sidebar.radio(
+    "Choose Target Language Scope:",
+    ["🏛️ English-Only Models", "🌐 Bilingual Models (EN/MS)"]
+)
+st.sidebar.markdown("---")
+
+# Route datasets and file naming conventions dynamically based on selection profiles
+if model_tier == "🏛️ English-Only Models":
+    target_file = "balanced_corpus.csv"
+    file_suffix = ""
+else:
+    target_file = "balanced_corpus_fixed.csv"
+    file_suffix = "_bilingual"
+
+st.title("Engine 2: Bag-of-Words (BoW)")
 st.markdown("---")
 
 # =====================================================================
 # 1. READ CLEAN DATASET & ASSETS SAFELY FROM LOCAL DISK / GITHUB
 # =====================================================================
 @st.cache_data
-def load_clean_corpus_data():
+def load_clean_corpus_data(filename):
     """Loads validation dataset locally, falling back to streaming directly from GitHub repository."""
-    if os.path.exists(LOCAL_DATA_PATH):
-        return pd.read_csv(LOCAL_DATA_PATH)
+    local_path = os.path.join(BASE_DIR, "data", filename)
+    if os.path.exists(local_path):
+        return pd.read_csv(local_path)
         
-    # Cascade fallback to handle GitHub main/master branches gracefully
-    for url in [REMOTE_DATA_URL_MAIN, REMOTE_DATA_URL_MASTER]:
+    urls = [
+        f"https://raw.githubusercontent.com/lcokun/final-project-nlp/main/{filename}",
+        f"https://raw.githubusercontent.com/lcokun/final-project-nlp/master/{filename}"
+    ]
+    for url in urls:
         try:
             df = pd.read_csv(url)
             return df
@@ -106,25 +123,29 @@ def load_clean_corpus_data():
     return None
 
 @st.cache_resource
-def load_bow_model_assets():
+def load_bow_model_assets(suffix):
     try:
         return {
-            "vec": joblib.load(os.path.join(MODELS_PATH, "vectorizer_bow.joblib")),
-            "Naive Bayes (BoW)": joblib.load(os.path.join(MODELS_PATH, "naive_bayes_bow.joblib")),
-            "Logistic Regression (BoW)": joblib.load(os.path.join(MODELS_PATH, "logistic_regression_bow.joblib")),
-            "Support Vector Machine (BoW)": joblib.load(os.path.join(MODELS_PATH, "svm_bow.joblib"))
+            "vec": joblib.load(os.path.join(MODELS_PATH, f"vectorizer_bow{suffix}.joblib")),
+            "Naive Bayes (BoW)": joblib.load(os.path.join(MODELS_PATH, f"naive_bayes_bow{suffix}.joblib")),
+            "Logistic Regression (BoW)": joblib.load(os.path.join(MODELS_PATH, f"logistic_regression_bow{suffix}.joblib")),
+            "Support Vector Machine (BoW)": joblib.load(os.path.join(MODELS_PATH, f"svm_bow{suffix}.joblib"))
         }
     except Exception as e:
-        st.error(f"❌ **Asset Ingestion Error:** Failed to load your scikit-learn `.joblib` pipelines. Details: {e}")
+        st.error(f"❌ **Asset Ingestion Error:** Failed to load your scikit-learn `.joblib` pipelines with suffix '{suffix}'. Details: {e}")
         return None
 
-df_corpus = load_clean_corpus_data()
-assets = load_bow_model_assets()
+df_corpus_raw = load_clean_corpus_data(target_file)
+assets = load_bow_model_assets(file_suffix)
 
-if df_corpus is not None and assets is not None:
+if df_corpus_raw is not None and assets is not None:
     # Safely identify dataset structural columns
-    text_col = "comment_text" if "comment_text" in df_corpus.columns else df_corpus.columns[0]
-    label_col = "is_toxic" if "is_toxic" in df_corpus.columns else df_corpus.columns[1]
+    text_col = "comment_text" if "comment_text" in df_corpus_raw.columns else df_corpus_raw.columns[0]
+    label_col = "is_toxic" if "is_toxic" in df_corpus_raw.columns else df_corpus_raw.columns[1]
+
+    # Standardize compilation slice matrix size constraint to exactly 10000 items
+    sample_size = min(len(df_corpus_raw), 10000)
+    df_corpus = df_corpus_raw.sample(sample_size, random_state=42)
 
     X_test = df_corpus[text_col].astype(str).tolist()
     y_test = df_corpus[label_col].tolist()
@@ -132,7 +153,7 @@ if df_corpus is not None and assets is not None:
     # =====================================================================
     # 2. INTERACTIVE SELECTBOX HUB CONTROLS
     # =====================================================================
-    st.subheader("⚙️ Classifier Selector Panel")
+    st.subheader(f"⚙️ Classifier Selector Panel ({target_file})")
     chosen_algo = st.selectbox(
         "Choose an Active Bag-of-Words Classifier to Evaluate & Review:", 
         ["Naive Bayes (BoW)", "Logistic Regression (BoW)", "Support Vector Machine (BoW)"]
@@ -154,7 +175,7 @@ if df_corpus is not None and assets is not None:
     # 4. CHOSEN CLASSIFIER LIVE METRICS DASHBOARD
     # =====================================================================
     st.markdown("---")
-    st.write(f"### 📊 Real-Time Metric Performance Dashboard: **{chosen_algo}**")
+    st.write(f"### 📊 Metric Performance for: **{chosen_algo}**)")
     
     # Render upper summary card components
     m1, m2, m3, m4 = st.columns(4)
@@ -178,12 +199,12 @@ if df_corpus is not None and assets is not None:
     # =====================================================================
     st.markdown("---")
     st.write("### ☁️ Class-Specific Document Word Clouds")
-    st.write("Generated live from your actual cleaned dataset rows to expose language pattern weights:")
+    st.write(f"Generated live from your current dataset variations (`{target_file}`) to expose language pattern weights:")
     
     col_cloud1, col_cloud2 = st.columns(2)
     
     with col_cloud1:
-        st.markdown("#### 🍏 Safe Content Word Space (Class 0)")
+        st.markdown("#### 🍏 Safe Content Words(Class 0)")
         clean_text_pool = " ".join(df_corpus[df_corpus[label_col] == 0][text_col].astype(str).tolist())
         if clean_text_pool.strip():
             wc_clean = WordCloud(width=600, height=320, background_color="#faf7f2", colormap="crest").generate(clean_text_pool)
@@ -195,7 +216,7 @@ if df_corpus is not None and assets is not None:
             st.caption("No non-toxic rows found inside source csv columns.")
 
     with col_cloud2:
-        st.markdown("#### 🚨 Toxic Content Word Space (Class 1)")
+        st.markdown("#### 🚨 Toxic Content Words(Class 1)")
         toxic_text_pool = " ".join(df_corpus[df_corpus[label_col] == 1][text_col].astype(str).tolist())
         if toxic_text_pool.strip():
             wc_toxic = WordCloud(width=600, height=320, background_color="#faf7f2", colormap="flare").generate(toxic_text_pool)
@@ -210,7 +231,7 @@ if df_corpus is not None and assets is not None:
     # 6. THREE DISTINCT VIZ CHARTS
     # =====================================================================
     st.markdown("---")
-    st.write("### 📈 Deep-Dive Diagnostic Analytics Profiles")
+    st.write("### 📈 Deep-Dive Diagnostic Analytics")
     
     viz1, viz2, viz3 = st.columns(3)
     
@@ -232,7 +253,7 @@ if df_corpus is not None and assets is not None:
             probabilities_array = active_classifier.predict_proba(X_test_vec)[:, 1]
         else:
             distance_scores = active_classifier.decision_function(X_test_vec)
-            probabilities_array = (distance_scores - distance_scores.min()) / (distance_scores.max() - distance_scores.min())
+            probabilities_array = (distance_scores - distance_scores.min()) / (distance_scores.max() - distance_scores.min() + 1e-9)
             
         fig_dist, ax_dist = plt.subplots(figsize=(4.5, 4))
         sns.histplot(probabilities_array, bins=15, kde=True, color="#6B1F3A", ax=ax_dist)
@@ -268,13 +289,19 @@ if df_corpus is not None and assets is not None:
     # 7. AUTOMATED LANGUAGE ROUTING PLAYGROUND
     # =====================================================================
     st.markdown("---")
-    st.subheader("🔬 Automated Language Detection & Live Validation Console")
+    st.subheader("🔬 Automated Language Detection & Live Validation")
     st.markdown("Type an experimental comment in either language. The system will auto-detect the context signature profiles.")
     
+    # Adapt target input defaults depending on linguistic tracking architectures
+    if model_tier == "🏛️ English-Only Models":
+        default_playground_val = "You are completely useless and everything you say is absolute nonsense."
+    else:
+        default_playground_val = "I really think your management style tu sangat teruk, please fix your attitude."
+
     user_experiment_text = st.text_input(
         "Type an experimental sentence structure here to scan with this specific model setup:",
-        value="Saya sangat benci dengan perangai buruk awak.",
-        key="bow_playground_input"
+        value=default_playground_val,
+        key=f"bow_playground_input_{target_file}"
     )
     
     if st.button("Execute Safety Verification Scan") and user_experiment_text.strip() != "":
@@ -289,10 +316,6 @@ if df_corpus is not None and assets is not None:
         }
         base_model_id = algo_name_tokens.get(chosen_algo, "model_bow")
         resolved_model_string = f"{base_model_id}_bilingual" if detected_lang == "ms" else base_model_id
-        
-        # Display Active Routing Context along with the dynamically verified core model string name
-        st.info(f"⚡ **Routing Decision Engine:** Detected language signature code `{detected_lang.upper()}` (**{LANG_MAP[detected_lang]}**)")
-        st.success(f"🎯 **Active Core Architecture Engine Selected:** `{resolved_model_string}`")
         
         v_single = vec_transformer.transform([user_experiment_text])
         prediction_output = active_classifier.predict(v_single)[0]

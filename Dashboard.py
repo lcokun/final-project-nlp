@@ -26,7 +26,6 @@ except ImportError:
 # =====================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_PATH = os.path.join(BASE_DIR, "models")
-DATA_PATH = os.path.join(BASE_DIR, "data", "balanced_corpus.csv")
 
 # Model Repositories
 HF_REPO_EN = "lcokun/toxic-comment-distilbert"
@@ -52,14 +51,41 @@ st.markdown("""
 st.title("🛡️ Toxic Comment Detection System")
 st.markdown("---")
 
-# Cache data loading block
-@st.cache_data
-def get_dashboard_dataframe():
-    if not os.path.exists(DATA_PATH):
-        return None
-    return pd.read_csv(DATA_PATH)
+# =====================================================================
+# SIDEBAR INTERACTIVE TIERS CONTROL & PROJECT TEAM MEMBERS
+# =====================================================================
+st.sidebar.header("🛠️ Language Scope Control")
+model_tier = st.sidebar.radio(
+    "Choose Target Language Scope:",
+    ["🏛️ English-Only Models", "🌐 Bilingual Models (EN/MS)"]
+)
 
-df_corpus = get_dashboard_dataframe()
+st.sidebar.markdown("---")
+st.sidebar.header("👥 Project Team Members")
+
+# Rendered team profile elements layout blocks
+st.sidebar.markdown("""
+🟢 **Amil Hakim** *ML pipeline, bilingual models, XAI, inference module* \n
+🟢 **Faris Haziq** *Dataset preprocessing, bilingual corpus, EDA* \n
+🟢 **Irfan Johan** *Streamlit app, deployment, poster*
+""")
+st.sidebar.markdown("---")
+
+# Determine active target file configuration based on model framework selection
+if model_tier == "🏛️ English-Only Models":
+    target_filename = "balanced_corpus.csv"
+else:
+    target_filename = "balanced_corpus_fixed.csv"
+
+# Cache data loading block updated to support dynamic switching
+@st.cache_data
+def get_dashboard_dataframe(filename):
+    file_path = os.path.join(BASE_DIR, "data", filename)
+    if not os.path.exists(file_path):
+        return None
+    return pd.read_csv(file_path)
+
+df_corpus = get_dashboard_dataframe(target_filename)
 
 if df_corpus is not None:
     # Auto-detect column headers
@@ -76,10 +102,10 @@ if df_corpus is not None:
     # =====================================================================
     # 1. DYNAMIC SYSTEM OVERVIEW & METRICS PROFILE
     # =====================================================================
-    st.subheader("📋 System Overview & Project Dashboard")
-    st.markdown("""
+    st.subheader(f"📋 System Overview & Project Dashboard ({target_filename})")
+    st.markdown(f"""
     Welcome to the content moderation gateway. The prediction architecture has been split 
-    across dedicated linguistic and architectural feature engine workspaces.
+    across dedicated linguistic and architectural feature engine workspaces. Active dataset: `{target_filename}`.
     """)
 
     col1, col2 = st.columns([1, 2])
@@ -120,38 +146,24 @@ if df_corpus is not None:
 
     st.markdown("---")
 
-    # =====================================================================
-    # SIDEBAR INTERACTIVE TIERS CONTROL & PROJECT TEAM MEMBERS
-    # =====================================================================
-    st.sidebar.header("🛠️ Language Scope Control")
-    model_tier = st.sidebar.radio(
-        "Choose Target Language Scope:",
-        ["🏛️ English-Only Models", "🌐 Bilingual Models (EN/MS)"]
-    )
-
-    st.sidebar.markdown("---")
-    st.sidebar.header("👥 Project Team Members")
-    
-    # Rendered team profile elements layout blocks
-    st.sidebar.markdown("""
-    🟢 **Amil Hakim** *ML pipeline, bilingual models, XAI, inference module* \n
-    🟢 **Faris Haziq** *Dataset preprocessing, bilingual corpus, EDA* \n
-    🟢 **Irfan Johan** *Streamlit app, deployment, poster*
-    """)
-    st.sidebar.markdown("---")
-
     # Global Sandbox Playground Entry
     st.subheader("🔬 Explainable AI (XAI) Diagnostic")
     st.markdown("Evaluate exactly which contextual tokens or language patterns forced classifier model decisions:")
 
+    # Adapt target input defaults depending on linguistic tracking architectures
+    if model_tier == "🏛️ English-Only Models":
+        default_xai_val = "You are a stupid idiot and I will block you immediately."
+    else:
+        default_xai_val = "I really think your management style tu sangat teruk, please fix your attitude."
+
     xai_input = st.text_input(
         "Type an experimental comment structure here to scan via active pipelines:", 
-        value="You are a stupid idiot and I will block you immediately.",
-        key="playground_main_input"
+        value=default_xai_val,
+        key=f"playground_main_input_{target_filename}" # Appended unique identifier strings to trigger UI cache resets
     )
 
     # Set file suffix dynamically based on sidebar scope selection
-    suffix = "_bilingual" if "Bilingual" in model_tier else ""
+    suffix = "_bilingual" if model_tier == "🌐 Bilingual Models (EN/MS)" else ""
 
     # Shared helper function to cache transformer models safely
     @st.cache_resource
@@ -164,7 +176,7 @@ if df_corpus is not None:
             return None, None
 
     # =====================================================================
-    # TIER A: ENGLISH-ONLY MODELS VIEW (Classical + DistilBERT)
+    # TIER A: ENGLISH-ONLY MODELS VIEW (Classical + DistilBERT on balanced_corpus.csv)
     # =====================================================================
     if model_tier == "🏛️ English-Only Models":
         st.markdown("### 🏛️ English-Only Language Gateway")
@@ -211,6 +223,7 @@ if df_corpus is not None:
                                     probs = 1 / (1 + np.exp(-scores))
                                     return np.column_stack([1 - probs, probs])
 
+                            # Standardized parameter constraint using exactly 300 inference test array mutations
                             exp = explainer.explain_instance(xai_input, predict_fn, num_features=8, num_samples=300, labels=[1])
                             exp_list = exp.as_list(label=1)
 
@@ -270,7 +283,7 @@ if df_corpus is not None:
                             st.error(f"❌ Failed connecting to HuggingFace hub to load model: `{HF_REPO_EN}`.")
 
     # =====================================================================
-    # TIER B: BILINGUAL MODELS VIEW (Classical + XLM-RoBERTa)
+    # TIER B: BILINGUAL MODELS VIEW (Classical + XLM-RoBERTa on balanced_corpus_fixed.csv)
     # =====================================================================
     elif model_tier == "🌐 Bilingual Models (EN/MS)":
         st.markdown("### 🌐 Bilingual Language (Malay & English)")
@@ -278,7 +291,6 @@ if df_corpus is not None:
         if xai_input:
             detected_code = detect_language(xai_input)
             display_name = LANG_MAP.get(detected_code, "🌐 Unknown Language Standard")
-        
             
             bilingual_mode = st.radio(
                 "Select Bilingual Framework Strategy:",
@@ -321,6 +333,7 @@ if df_corpus is not None:
                                     probs = 1 / (1 + np.exp(-scores))
                                     return np.column_stack([1 - probs, probs])
 
+                            # Standardized parameter constraint using exactly 300 inference test array mutations
                             exp = explainer.explain_instance(xai_input, predict_fn, num_features=8, num_samples=300, labels=[1])
                             exp_list = exp.as_list(label=1)
 
@@ -379,4 +392,4 @@ if df_corpus is not None:
                         else:
                             st.error(f"❌ Failed connecting to HuggingFace hub to load model: `{HF_REPO_BI}`.")
 else:
-    st.error(f"❌ **Dataset Resolution Failure:** Could not locate files at path: `{DATA_PATH}`.")
+    st.error(f"❌ **Dataset Resolution Failure:** Could not locate active target file database matching `{target_filename}` inside your local data folder path.")
